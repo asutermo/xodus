@@ -21,7 +21,7 @@ Windows continues here
     </ps:AuthInfo>
     <wsse:Security>
       <wsse:UsernameToken wsu:Id="user">
-        <wsse:Username>somerealmail@live.com</wsse:Username>
+        <wsse:Username>user@example.com</wsse:Username>
         <wsse:LoginOption>6</wsse:LoginOption>
       </wsse:UsernameToken>
       <wsse:SecurityTokenReference>
@@ -131,7 +131,7 @@ Then RST2
     </ps:AuthInfo>
     <wsse:Security>
       <wsse:UsernameToken wsu:Id="user">
-        <wsse:Username>somerealmail@live.com</wsse:Username>
+        <wsse:Username>user@example.com</wsse:Username>
         <wsse:LoginOption>6</wsse:LoginOption>
       </wsse:UsernameToken>
       <wsse:BinarySecurityToken EncodingType="ps:JWT" ValueType="ps:LoginKeyToken" Id="LoginKeyToken">JWT</wsse:BinarySecurityToken>
