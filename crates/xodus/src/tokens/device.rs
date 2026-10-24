@@ -19,7 +19,16 @@ pub async fn ensure_device_credentials(client: &reqwest::Client, tokens: &TokenM
 }
 
 async fn provision_device(client: &reqwest::Client, tokens: &TokenManager) {
-    let username = format!("02{}", generate_string(14));
+    // DeviceName must be a hex representation of a binary blob (the licensing
+    // service rejects non-hex usernames with DeviceNameNotHexBinary / 3043),
+    // so build the username from hex characters only: "02" + 7 random bytes
+    // hex-encoded = 16 chars.
+    use rand::RngExt;
+    let hex_bytes: [u8; 7] = rand::rng().random();
+    let username = format!(
+        "02{}",
+        hex_bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    );
     let password = generate_string(20);
     let provision = DeviceAddRequest {
         client_info: ClientInfo::default(),

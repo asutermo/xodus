@@ -24,6 +24,12 @@ enum SubCommand {
             help = "Display download URLs instead of downloading"
         )]
         dry_run: bool,
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Download all files without interactive selection"
+        )]
+        all: bool,
     },
     #[command(about = "Dump CIKs for use with XvdTool")]
     License {
@@ -41,6 +47,7 @@ enum SubCommand {
         #[arg(short, long)]
         market: Option<String>,
     },
+    #[cfg(feature = "eappx")]
     #[command(
         about = "Extract a locally stored EAppx/EMSIX package (research task, see issue #91)"
     )]
@@ -172,7 +179,8 @@ async fn main() -> ExitCode {
             product,
             market,
             dry_run,
-        } => commands::download::run(&client, &tokens, product, market, dry_run).await,
+            all,
+        } => commands::download::run(&client, &tokens, product, market, dry_run, all).await,
         SubCommand::License {
             content_id,
             market,
@@ -203,6 +211,7 @@ async fn main() -> ExitCode {
             )
             .await
         }
+        #[cfg(feature = "eappx")]
         SubCommand::ExtractEappx {
             path,
             destination,

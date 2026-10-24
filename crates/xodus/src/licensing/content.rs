@@ -60,7 +60,13 @@ pub async fn get_license_content(
         .send()
         .await?;
 
-    let content_res = response.json::<LicenseContentResponse>().await?;
+    let raw = response.text().await?;
+    let content_res = serde_json::from_str::<LicenseContentResponse>(&raw).map_err(|e| {
+        eprintln!("RAW LICENSING RESPONSE: {raw}");
+        LicenseContentError::NotEntitled {
+            description: format!("response decode failed: {e}"),
+        }
+    })?;
     let content = match content_res {
         LicenseContentResponse::Success { license } => license,
         LicenseContentResponse::SatisfactionFailure {

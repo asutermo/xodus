@@ -7,7 +7,7 @@ default-run = "xodus-cli"
 [dependencies]
 xodus = { path = "../xodus" }
 msixvc = { path = "../msixvc" }
-eappx = { git = "https://github.com/tuxuser/eappx-rs" }
+eappx = { git = "https://github.com/tuxuser/eappx-rs", optional = true }
 base64 = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
@@ -32,3 +32,4 @@ nix = "0.31.3"
 
 [features]
 tokio_console = ["dep:console-subscriber"]
+eappx = ["dep:eappx"]

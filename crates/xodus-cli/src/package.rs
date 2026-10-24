@@ -9,6 +9,7 @@ pub async fn get_content_id(
     client: &reqwest::Client,
     product: String,
     market: Option<String>,
+    auto: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let displaycatalog = find_products_by_id(
         client,
@@ -51,13 +52,21 @@ pub async fn get_content_id(
 
     let Some(package) = found_package else {
         if !subprods.is_empty() {
+            if auto {
+                let item = subprods
+                    .first()
+                    .cloned()
+                    .ok_or_else(|| std::io::Error::other("No subproducts found"))?;
+                println!("Auto-selected subproduct: {item}");
+                return Box::pin(get_content_id(client, item, market, auto)).await;
+            }
             let Ok(item) = Select::new("Select files to download", subprods)
                 .with_page_size(30)
                 .prompt()
             else {
                 return Err(Box::new(std::io::Error::other("Selection failed")));
             };
-            return Box::pin(get_content_id(client, item, market)).await;
+            return Box::pin(get_content_id(client, item, market, auto)).await;
         }
 
         return Err(Box::new(std::io::Error::other(

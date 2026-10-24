@@ -16,8 +16,9 @@ pub async fn run(
     product: String,
     market: Option<String>,
     dry_run: bool,
+    all: bool,
 ) -> ExitCode {
-    let content_id_task = get_content_id(client, product, market).await;
+    let content_id_task = get_content_id(client, product, market, all).await;
     let Ok(content_id) = content_id_task else {
         let Err(err) = content_id_task else {
             eprintln!("Unknown Error");
@@ -37,21 +38,27 @@ pub async fn run(
         return ExitCode::FAILURE;
     };
 
-    let Ok(files) = MultiSelect::new("Select files to download", package.package_files)
-        .with_page_size(30)
-        .with_validator(|input: &[inquire::list_option::ListOption<&PackageFile>]| {
-            if !input.is_empty() {
-                Ok(Validation::Valid)
-            } else {
-                Ok(Validation::Invalid(
-                    "At least one item has to be selected".into(),
-                ))
-            }
-        })
-        .prompt()
-    else {
-        tracing::error!("Selection failed");
-        return ExitCode::FAILURE;
+    let files = if all {
+        println!("Downloading all {} files", package.package_files.len());
+        package.package_files
+    } else {
+        let Ok(files) = MultiSelect::new("Select files to download", package.package_files)
+            .with_page_size(30)
+            .with_validator(|input: &[inquire::list_option::ListOption<&PackageFile>]| {
+                if !input.is_empty() {
+                    Ok(Validation::Valid)
+                } else {
+                    Ok(Validation::Invalid(
+                        "At least one item has to be selected".into(),
+                    ))
+                }
+            })
+            .prompt()
+        else {
+            tracing::error!("Selection failed");
+            return ExitCode::FAILURE;
+        };
+        files
     };
     println!();
     for file in files {

@@ -1,6 +1,7 @@
 pub mod clep;
 pub mod download;
 pub mod extract;
+#[cfg(feature = "eappx")]
 pub mod extract_eappx;
 pub mod license;
 pub mod login;
