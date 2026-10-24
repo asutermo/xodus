@@ -113,7 +113,22 @@ impl<'a> RSTRequestBuilder<'a> {
         }
 
         let signature_template = self.build_request_signature_template();
-        self.header.security.signature = signature_template;
+        // PATCH: XODUS_UNSIGNED_RST=1 — omit the <Signature> element entirely.
+        // Per docs/xodus/device.md: "Omitting the <Signature> element from this
+        // request causes the server to return raw, unencrypted data instead of
+        // an encrypted payload - useful for inspecting responses while reverse
+        // engineering". This exposes ticket claims (DeviceName etc.) in plaintext.
+        // NOTE: only meaningful for HMAC-signed exchanges; the RSA-signed device
+        // auth MUST stay signed (server rejects unsigned device auth entirely).
+        // Must ALSO skip sign_xml (self.signature stays Some(Hmac) for response
+        // decryption keys, so gate the template AND the actual signing on the env).
+        let unsigned = std::env::var("XODUS_UNSIGNED_RST").is_ok()
+            && !matches!(self.signature, Some(super::RSTSignature::Rsa(_)));
+        if unsigned {
+            eprintln!("[rst] XODUS_UNSIGNED_RST: omitting <Signature> — server should return unencrypted response");
+        } else {
+            self.header.security.signature = signature_template;
+        }
 
         let body = soap::Body {
             body: if security_tokens.len() > 1 {
@@ -131,7 +146,14 @@ impl<'a> RSTRequestBuilder<'a> {
 
         let envelope = soap::Envelope::new(self.header, body);
         let xml = quick_xml::se::to_string(&envelope)?;
-        let signed_xml = utils::sign_xml(self.signature.as_ref(), &self.nonce, xml)?;
+        // PATCH: skip actual signing too when in unsigned mode (self.signature is
+        // still Some — it carries the HMAC secret needed to DECRYPT the response —
+        // but we must not run bergshamra::sign over XML missing its <Signature>).
+        let signed_xml = if unsigned {
+            xml
+        } else {
+            utils::sign_xml(self.signature.as_ref(), &self.nonce, xml)?
+        };
 
         Ok(RSTRequest {
             signed_xml,

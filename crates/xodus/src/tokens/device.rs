@@ -19,30 +19,64 @@ pub async fn ensure_device_credentials(client: &reqwest::Client, tokens: &TokenM
 }
 
 async fn provision_device(client: &reqwest::Client, tokens: &TokenManager) {
-    // DeviceName must be a hex representation of a binary blob (the licensing
-    // service rejects non-hex usernames with DeviceNameNotHexBinary / 3043),
-    // so build the username from hex characters only: "02" + 7 random bytes
-    // hex-encoded = 16 chars.
-    use rand::RngExt;
-    let hex_bytes: [u8; 7] = rand::rng().random();
-    let username = format!(
-        "02{}",
-        hex_bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
-    );
-    let password = generate_string(20);
+    // PATCH: hex-only username — see licensing::utils::generate_hex_string.
+    // The DeviceName claim derived from this must be hex (LicensingFD fault 3043).
+    let username = format!("02{}", crate::licensing::utils::generate_hex_string(14));
+    let password = crate::licensing::utils::generate_hex_string(20);
+    if std::env::var("XODUS_DEBUG").is_ok() {
+        eprintln!("[provision] creating device credential, username={username}");
+    }
     let provision = DeviceAddRequest {
         client_info: ClientInfo::default(),
         authentication: Authentication::new(username.clone(), password.clone()),
         device_info: Some(DeviceInfo {
             id: "DeviceInfo".to_string(),
-            components: hardware::probe_provision_components(),
+            components: {
+                let mut components = hardware::probe_provision_components();
+                // PATCH: with XODUS_FRESH_DEVICE=1, randomize the SMBIOS identity
+                // components (4100=version, 4101=serial, 4102=uuid) so MSA registers
+                // a brand-new device instead of deduping onto a stale registration
+                // that carries a pre-patch non-hex DeviceName claim.
+                if std::env::var("XODUS_FRESH_DEVICE").is_ok() {
+                    eprintln!("[provision] XODUS_FRESH_DEVICE: randomizing hardware identity");
+                    for comp in components.iter_mut() {
+                        if comp.name == 4101 || comp.name == 4102 {
+                            comp.value = Some(crate::licensing::utils::generate_hex_string(32));
+                            comp.error = None;
+                        }
+                    }
+                }
+                components
+            },
             tpm_info: None,
         }),
     };
 
+    // PATCH: dump raw provisioning request for claim inspection (XODUS_DEBUG=1)
+    if std::env::var("XODUS_DEBUG").is_ok() {
+        if let Ok(xml) = quick_xml::se::to_string(&provision) {
+            let _ = std::fs::create_dir_all("out");
+            let _ = std::fs::write("out/provision_request.xml", &xml);
+            eprintln!("[provision] request xml written to out/provision_request.xml");
+        }
+    }
+
     let dev = crate::api::live::login_device_credential(client, provision)
         .await
         .expect("Failed to get device creds");
+
+    // PATCH: dump SPLicense identity fields (XODUS_DEBUG=1)
+    // The DeviceName claim inside device STS tickets is minted from data MSA
+    // stores at deviceaddcredential time — the SPLicense identity fields show
+    // exactly what device identity MSA bound.
+    if std::env::var("XODUS_DEBUG").is_ok() {
+        eprintln!("[provision] HWDeviceID={} GlobalDeviceID={} puid={}", dev.hw_device_id, dev.global_device_id, dev.puid);
+        if let Ok(sp) = SPLicense::parse_base64(&dev.license.splicense_block) {
+            eprintln!("[provision] splicense device_id: {:02x?}", sp.device_id);
+            eprintln!("[provision] splicense hardware_id: {:02x?}", sp.hardware_id);
+            eprintln!("[provision] splicense package_name: {}", sp.package_name);
+        }
+    }
 
     let device = Device {
         username: username.clone(),
@@ -66,6 +100,9 @@ async fn reauthenticate_device(client: &reqwest::Client, tokens: &TokenManager, 
     let clep_sign_state = sp_license.clep_sign_state.expect("Missing clep sign state");
     let key = clep_sign_state.get_rsa_key();
     let private_key = parse_bcrypt_rsa_private(&key).unwrap();
+    if std::env::var("XODUS_DEBUG").is_ok() {
+        eprintln!("[reauth] authenticating device username={}", license.username);
+    }
     let resp = crate::api::live::authenticate_device(client, license.username, private_key)
         .await
         .expect("Failed to auth device");
@@ -89,8 +126,15 @@ fn save_device_sts_token(
         .as_ref()
         .unwrap()
         .clone();
-    let token = (*resp).into();
+    let token: crate::models::secrets::Token = (*resp).into();
+    // PATCH: save under the response's key_name AND the well-known lookup key.
+    // get_device_sts_token() looks up PASSPORT_STS ("http://Passport.NET/STS"),
+    // but fresh device registrations may return a different key_name — saving
+    // only under that left the lookup empty (NotFound panic in license.rs).
     tokens
-        .save_device_token(key_name, token)
+        .save_device_token(key_name.clone(), token.clone())
         .expect("Failed to save device token");
+    tokens
+        .save_device_token("http://Passport.NET/STS".to_string(), token)
+        .expect("Failed to save device token (passport sts)");
 }

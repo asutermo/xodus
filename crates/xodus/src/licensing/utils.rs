@@ -13,6 +13,20 @@ pub fn generate_string(length: usize) -> String {
     Alphanumeric.sample_string(&mut rand::rng(), length)
 }
 
+/// Hex-only device username — LicensingFD requires the DeviceName claim in
+/// device tokens to be a hex representation of a binary blob (fault 3043
+/// DeviceNameNotHexBinary otherwise). Alphanumeric names break the license flow.
+pub fn generate_hex_string(length: usize) -> String {
+    use rand::Rng;
+    let mut bytes = vec![0u8; (length + 1) / 2];
+    rand::rng().fill_bytes(&mut bytes);
+    bytes
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>()[..length]
+        .to_string()
+}
+
 pub fn parse_bcrypt_rsa_private(blob: &BCryptRsaBlock) -> rsa::errors::Result<RsaPrivateKey> {
     let u32_at = |o: usize| u32::from_le_bytes(blob[o..o + 4].try_into().unwrap()) as usize;
 

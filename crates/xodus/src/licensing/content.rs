@@ -60,22 +60,28 @@ pub async fn get_license_content(
         .send()
         .await?;
 
-    let raw = response.text().await?;
-    let content_res = serde_json::from_str::<LicenseContentResponse>(&raw).map_err(|e| {
-        eprintln!("RAW LICENSING RESPONSE: {raw}");
-        LicenseContentError::NotEntitled {
-            description: format!("response decode failed: {e}"),
+    let content_res = {
+        // PATCH: capture raw body for diagnostics before serde
+        let text = response.text().await?;
+        if std::env::var("XODUS_DEBUG").is_ok() {
+            eprintln!("[licensing raw response (first 2000 chars)]:\n{}", &text[..text.len().min(2000)]);
         }
-    })?;
+        serde_json::from_str::<LicenseContentResponse>(&text).map_err(|e| {
+            let msg = format!("raw body: {}", &text[..text.len().min(500)]);
+            LicenseContentError::NotEntitled { description: format!("decode failed: {e}; body: {msg}") }
+        })?
+    };
+    if let LicenseContentResponse::SatisfactionFailure {
+        satisfaction_failure,
+    } = content_res
+    {
+        return Err(LicenseContentError::NotEntitled {
+            description: satisfaction_failure.description,
+        });
+    }
     let content = match content_res {
         LicenseContentResponse::Success { license } => license,
-        LicenseContentResponse::SatisfactionFailure {
-            satisfaction_failure,
-        } => {
-            return Err(LicenseContentError::NotEntitled {
-                description: satisfaction_failure.description,
-            });
-        }
+        _ => unreachable!(),
     };
     let license = &content.keys[0].value;
     let license = BASE64_STANDARD.decode(license).unwrap();

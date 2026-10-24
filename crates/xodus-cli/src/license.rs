@@ -70,6 +70,14 @@ pub async fn get_license(
         return Err("Unsupported token".to_string());
     };
 
+    // PATCH: dump compact tickets for offline claim inspection (XODUS_DEBUG=1)
+    if std::env::var("XODUS_DEBUG").is_ok() {
+        let _ = std::fs::write("out/device_ticket.b64", &ms_device_token);
+        let _ = std::fs::write("out/user_ticket.b64", &user_token);
+        eprintln!("[debug] device ticket written to out/device_ticket.b64 ({} bytes)", ms_device_token.len());
+        eprintln!("[debug] user ticket written to out/user_ticket.b64 ({} bytes)", user_token.len());
+    }
+
     let (_content, game_license) = xodus::licensing::content::get_license_content(
         client,
         ms_device_token,

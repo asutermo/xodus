@@ -27,7 +27,47 @@ impl<'a> RSTRequest<'a> {
         .await?;
 
         let response_text = response.text().await?;
-        let envelope: soap::Envelope = quick_xml::de::from_str(&response_text)?;
+        // PATCH: dump raw RST2 response for claim inspection (XODUS_DEBUG=1)
+        if std::env::var("XODUS_DEBUG").is_ok() {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static RST_SEQ: AtomicU32 = AtomicU32::new(0);
+            let n = RST_SEQ.fetch_add(1, Ordering::Relaxed);
+            let path = format!("out/rst_response_{}.xml", n);
+            let _ = std::fs::create_dir_all("out");
+            let _ = std::fs::write(&path, &response_text);
+            eprintln!("[rst] response {} ({} bytes) written to {}", n, response_text.len(), path);
+        }
+        let envelope: soap::Envelope = {
+            // PATCH: unsigned responses to exchanges are SOAP faults WITHOUT the
+            // wsa:Action header the strict Envelope struct requires (observed:
+            // "Invalid STS request" 0x80048820). Faults are terminal for the flow —
+            // dump (already done above) and surface a clean error instead of
+            // a serde panic.
+            match quick_xml::de::from_str::<soap::Envelope>(&response_text) {
+                Ok(env) => env,
+                Err(de_err) => {
+                    if response_text.contains("S:Fault") {
+                        let status = response_text
+                            .split("<psf:value>")
+                            .nth(1)
+                            .and_then(|s| s.split("<").next())
+                            .unwrap_or("?")
+                            .to_string();
+                        let text = response_text
+                            .split("<psf:text>")
+                            .nth(1)
+                            .map(|s| {
+                                s.split("</psf:text>").next().unwrap_or("").to_string()
+                            })
+                            .unwrap_or_default();
+                        return Err(super::RSTError::InvalidResponseSignature(format!(
+                            "server rejected request: fault {status}: {text} (deser err: {de_err}; raw in out/)"
+                        )));
+                    }
+                    return Err(de_err.into());
+                }
+            }
+        };
 
         verify_and_decrypt_envelope(self.signature, response_text, envelope)
     }
@@ -85,6 +125,19 @@ fn verify_and_decrypt_envelope<'a>(
     if let soap::BodyContent::EncryptedData(enc_data) = envelope.body.body {
         tracing::trace!("Decrypting soap::Body");
         envelope.body.body = utils::decrypt_soap_encrypted_data(enc_data, &signature, &nonces)?;
+    }
+
+    // PATCH: dump the fully decrypted envelope (claims visible, e.g. DeviceName)
+    if std::env::var("XODUS_DEBUG").is_ok() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static DEC_SEQ: AtomicU32 = AtomicU32::new(0);
+        let n = DEC_SEQ.fetch_add(1, Ordering::Relaxed);
+        if let Ok(dec) = quick_xml::se::to_string(&envelope) {
+            let path = format!("out/rst_decrypted_{}.xml", n);
+            let _ = std::fs::create_dir_all("out");
+            let _ = std::fs::write(&path, &dec);
+            eprintln!("[rst] decrypted envelope {} ({} bytes) written to {}", n, dec.len(), path);
+        }
     }
 
     Ok(envelope)
