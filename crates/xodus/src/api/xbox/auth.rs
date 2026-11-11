@@ -5,14 +5,27 @@ use crate::models::xbox::{
 pub async fn authenticate_xbox_user(
     client: &reqwest::Client,
     rps_ticket: String,
-) -> reqwest::Result<XstsResponse> {
+) -> std::result::Result<XstsResponse, Box<dyn std::error::Error>> {
     let body = UserAuthRequest {
         relying_party: "http://auth.xboxlive.com".to_string(),
         token_type: "JWT".to_string(),
         properties: UserAuthProperties {
             auth_method: "RPS".to_string(),
             site_name: "user.auth.xboxlive.com".to_string(),
-            rps_ticket,
+            // RPS ticket prefix: xal supports "d=" (OAuth token), "t=" (MBI_SSL
+            // SOAP ticket), or none. The SOAP compact ticket from the login
+            // flow is an MBI_SSL ticket → "t=" (selectable via XBL_RPS_PREFIX
+            // for experimentation; 2026-11-10: bare and "d=" both 400'd).
+            rps_ticket: {
+                let p = std::env::var("XBL_RPS_PREFIX").unwrap_or_else(|_| "t=".to_string());
+                if rps_ticket.starts_with("d=") || rps_ticket.starts_with("t=") {
+                    rps_ticket
+                } else if p == "none" {
+                    rps_ticket
+                } else {
+                    format!("{p}{rps_ticket}")
+                }
+            },
         },
     };
 
@@ -22,25 +35,34 @@ pub async fn authenticate_xbox_user(
         .header("x-xbl-contract-version", "1")
         .json(&body)
         .send()
-        .await?
-        .error_for_status()?;
+        .await?;
 
-    resp.json().await
+    let status = resp.status();
+    let text = resp.text().await?;
+    if !status.is_success() {
+        return Err(format!("user.auth {} body: {}", status, &text[..text.len().min(400)]).into());
+    }
+    serde_json::from_str(&text).map_err(|e| {
+        format!("user.auth body parse failed: {e} | body head: {}", &text[..text.len().min(200)]).into()
+    })
 }
 
 pub async fn request_xsts_token(
     client: &reqwest::Client,
     token: String,
     relying_party: &str,
+    device_token: Option<String>,
+    sandbox_id: Option<String>,
 ) -> reqwest::Result<XstsResponse> {
     let body = XstsRequest {
         relying_party: Some(relying_party.to_string()),
         token_type: Some("JWT".to_string()),
         properties: XstsPropertyBag {
             user_tokens: Some(vec![token]),
-            sandbox_id: Some("RETAIL".to_string()),
+            sandbox_id: sandbox_id.or(Some("RETAIL".to_string())),
             delegation_token: None,
             service_token: None,
+            device_token,
         },
     };
 

@@ -12,6 +12,8 @@ pub async fn run(
     dev_token: LegacyToken,
     legacy: LegacyToken,
     relying_party: &str,
+    device_token: Option<String>,
+    sandbox_id: Option<String>,
 ) -> XstsResponse {
     let user_token = crate::api::live::exchange_user_token(
         client,
@@ -53,7 +55,7 @@ pub async fn run(
         .await
         .expect("Failed to authenticate Xbox user");
 
-    request_xsts_token(client, resp.token, relying_party)
+    request_xsts_token(client, resp.token, relying_party, device_token, sandbox_id)
         .await
         .expect("Failed to authenticate Xbox user")
 }

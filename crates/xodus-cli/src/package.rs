@@ -98,7 +98,7 @@ pub async fn get_packages(
     };
 
     let xsts_token =
-        xodus::api::xbox::run(client, dev_token, legacy, "http://update.xboxlive.com").await;
+        xodus::api::xbox::run(client, dev_token, legacy, "http://update.xboxlive.com", None, None).await;
 
     let response = client
         .get(format!(

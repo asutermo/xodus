@@ -71,6 +71,13 @@ pub struct XstsPropertyBag {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delegation_token: Option<String>,
+
+    /// Device token (XToken JWT form) — used for hybrid user+device mints
+    /// (2026-11-10 license-floor investigation: user-scope mints may bypass
+    /// the below-floor device-scope refusal; console device token supplied
+    /// externally via file).
+    #[serde(rename = "DeviceToken", skip_serializing_if = "Option::is_none")]
+    pub device_token: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

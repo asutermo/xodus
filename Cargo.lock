@@ -7185,6 +7185,7 @@ dependencies = [
  "inquire",
  "msixvc",
  "nix",
+ "reqwest 0.11.27",
  "reqwest 0.13.4",
  "rustix",
  "serde_json",
@@ -7195,6 +7196,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wry",
+ "xal",
  "xodus",
 ]
 

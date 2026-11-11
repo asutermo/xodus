@@ -96,6 +96,17 @@ enum SubCommand {
     SpLicense {
         block: String,
     },
+    /// 2026-11-10 license-floor investigation: mint an XSTS for an arbitrary RP
+    /// from the keychain's stored MSA tokens (no login). Optionally carries an
+    /// external device token (console JWT form) — the hybrid user+device mint.
+    MintXsts {
+        #[arg(long, default_value = "http://licensing.xboxlive.com")]
+        rp: String,
+        #[arg(long, help = "Path to a device-token JWT (XToken JWE form); omit = user-only mint")]
+        device_token_file: Option<String>,
+        #[arg(long, default_value = "RETAIL")]
+        sandbox: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -173,7 +184,6 @@ async fn main() -> ExitCode {
     if needs_device_credentials {
         xodus::tokens::device::ensure_device_credentials(&client, &tokens).await;
     }
-
     let code = match args.command {
         SubCommand::Download {
             product,
@@ -196,6 +206,43 @@ async fn main() -> ExitCode {
             .await
         }
         SubCommand::Login => commands::login::run(&client, &tokens).await,
+        SubCommand::MintXsts {
+            rp,
+            device_token_file,
+            sandbox,
+        } => {
+            let dev_token = tokens.get_device_sts_token();
+            let user_token = tokens.get_user_sts_token();
+            let (dev_token, user_token) = match (dev_token, user_token) {
+                (Ok(d), Ok(u)) => (d, u),
+                (Err(e), _) | (_, Err(e)) => {
+                    eprintln!("keychain token load failed: {e:?}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let (xodus::models::secrets::Token::Legacy(dev_token), xodus::models::secrets::Token::Legacy(user_token)) = (dev_token, user_token)
+            else {
+                eprintln!("unsupported token types in keychain");
+                return ExitCode::FAILURE;
+            };
+            let device_token = match &device_token_file {
+                Some(path) => match std::fs::read_to_string(path) {
+                    Ok(s) => Some(s.trim().to_string()),
+                    Err(e) => {
+                        eprintln!("device token file read failed: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                },
+                None => None,
+            };
+            eprintln!(
+                "minting XSTS: rp={rp} sandbox={sandbox} device_token={}",
+                device_token.as_ref().map(|t| format!("{} bytes", t.len())).unwrap_or_else(|| "none".into())
+            );
+            let resp = xodus::api::xbox::run(&client, dev_token, user_token, &rp, device_token, Some(sandbox)).await;
+            println!("{}", serde_json::to_string_pretty(&resp).unwrap_or_default());
+            ExitCode::SUCCESS
+        }
         SubCommand::Logout { device } => commands::logout::run(&tokens, device).await,
         SubCommand::Extract {
             path,
