@@ -1,9 +1,18 @@
 use inquire::Select;
+use uuid::Uuid;
 use xodus::XBOX_LIVE_PACKAGES_PC;
 use xodus::api::displaycatalog::find_products_by_id;
 use xodus::models::packagespc::{PackageDetails, PackageResponse};
 use xodus::models::secrets::Token;
 use xodus::tokens::TokenManager;
+
+/// ContentIds are UUIDs. A UUID-shaped input is treated as a direct ContentId
+/// and skips the displaycatalog lookup entirely, so owned titles that were
+/// delisted (and are therefore absent from the catalog) still resolve through
+/// GetBasePackage. See xodus issue #211.
+pub fn looks_like_content_id(product: &str) -> bool {
+    Uuid::parse_str(product).is_ok()
+}
 
 pub async fn get_content_id(
     client: &reqwest::Client,

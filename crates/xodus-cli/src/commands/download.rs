@@ -18,14 +18,26 @@ pub async fn run(
     dry_run: bool,
     all: bool,
 ) -> ExitCode {
-    let content_id_task = get_content_id(client, product, market, all).await;
-    let Ok(content_id) = content_id_task else {
-        let Err(err) = content_id_task else {
-            eprintln!("Unknown Error");
-            return ExitCode::FAILURE;
-        };
-        eprintln!("{}", err);
-        return ExitCode::FAILURE;
+    // Delisted titles are absent from displaycatalog but their packages stay
+    // downloadable from the CDN (verified: the CDN serves the full package for
+    // a manually supplied ContentId, no availability gate). A UUID-shaped
+    // input skips the catalog lookup and goes straight to GetBasePackage.
+    // See xodus issue #211.
+    let content_id = if crate::package::looks_like_content_id(&product) {
+        println!("UUID-shaped input, treating as ContentId (skipping catalog lookup)");
+        product.clone()
+    } else {
+        match get_content_id(client, product, market, all).await {
+            Ok(id) => id,
+            Err(err) => {
+                eprintln!("{err}");
+                eprintln!(
+                    "If this title is delisted, find its ContentId and pass it directly: \
+                     xodus-cli download <ContentId>"
+                );
+                return ExitCode::FAILURE;
+            }
+        }
     };
 
     let package_result = get_packages(client, tokens, content_id.clone()).await;
